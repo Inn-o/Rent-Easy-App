@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "408882580079",
+    "project_id": "rentmanagementtz",
+    "storage_bucket": "rentmanagementtz.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:408882580079:android:40190f64b3b23a5c75db9a",
+        "android_client_info": {
+          "package_name": "com.example.rent_easy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBQavwAkUd4nq9_d5X0XOZYj82p4q3gyog"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:408882580079:android:2405019a8aebe83075db9a",
+        "android_client_info": {
+          "package_name": "com.example.rent_management_tz"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBQavwAkUd4nq9_d5X0XOZYj82p4q3gyog"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
