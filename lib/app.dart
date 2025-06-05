@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rent_easy/theme.dart';
 import 'package:rent_easy/views/auth/login.dart';
+import 'package:rent_easy/views/auth/register_screen.dart';
 import 'package:rent_easy/views/owner/owner_dashboard.dart';
 //import 'package:rent_easy/views/owner/onboarding/onboarding_screen.dart';
 //import 'package:rent_easy/views/owner/dashboard.dart';
@@ -17,6 +18,9 @@ class MyApp extends StatelessWidget {
       theme: appTheme,
       //home: const LoginScreen(),
       home: const OwnerDashboard(),
+      //home: const RegisterScreen(),
+      //home: const OnboardingScreen(),
+      //home: const Dashboard(),
     );
   }
 }

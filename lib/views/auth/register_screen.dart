@@ -1,8 +1,7 @@
-// register_screen.dart (Only for owners)
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../owner/onboarding/onboarding_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:rent_easy/views/owner/owner_dashboard.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -12,65 +11,79 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final emailController = TextEditingController();
-  final passwordController = TextEditingController();
-  final nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _auth = FirebaseAuth.instance;
 
   Future<void> registerOwner() async {
     try {
-      final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: emailController.text.trim(),
-        password: passwordController.text.trim(),
+      final userCredential = await _auth.createUserWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
       );
 
       final uid = userCredential.user!.uid;
+
       await FirebaseFirestore.instance.collection('Users').doc(uid).set({
         'userId': uid,
-        'name': nameController.text.trim(),
-        'email': emailController.text.trim(),
-        'role': 'owner',
-        'onboardingComplete': false
+        'name': _nameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'role': 'owner', // Force role to be owner
       });
 
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const OnboardingScreen()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => OwnerDashboard()),
+      );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      print(e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Registration failed. Try again.')),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F7F2),
+      backgroundColor: Color(0xFFF8F7F2),
+      appBar: AppBar(
+        title: Text('Register as Owner'),
+        backgroundColor: Color(0xFF22577A),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text("Owner Registration", style: TextStyle(fontSize: 28, color: Color(0xFF22577A))),
-              const SizedBox(height: 20),
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: 'Full Name'),
+        child: Column(
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(labelText: 'Full Name'),
+            ),
+            TextField(
+              controller: _emailController,
+              decoration: InputDecoration(labelText: 'Email'),
+            ),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: InputDecoration(labelText: 'Password'),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: registerOwner,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Color(0xFFFB3640),
               ),
-              TextField(
-                controller: emailController,
-                decoration: const InputDecoration(labelText: 'Email'),
-              ),
-              TextField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Password'),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFB3640)),
-                onPressed: registerOwner,
-                child: const Text("Register", style: TextStyle(color: Colors.white)),
-              )
-            ],
-          ),
+              child: Text('Register as Owner'),
+            ),
+            SizedBox(height: 20),
+            Text(
+              'Note: Tenants will be added by the Owner using the onboarding screen.',
+              style: TextStyle(color: Color(0xFF22577A)),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       ),
     );
