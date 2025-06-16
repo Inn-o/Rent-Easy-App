@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 
 class SubmitMaintenanceRequestScreen extends StatelessWidget {
+  const SubmitMaintenanceRequestScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(

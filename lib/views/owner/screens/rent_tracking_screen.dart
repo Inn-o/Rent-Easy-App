@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 
 class RentTrackingScreen extends StatelessWidget {
+  const RentTrackingScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(

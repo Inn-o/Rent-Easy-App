@@ -10,7 +10,7 @@ import 'package:rent_easy/views/tenant/tenants_dashboard.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -125,7 +125,7 @@ class _LoginScreenState extends State<LoginScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            'Welcome Back',
+                            'Welcome',
                             style: GoogleFonts.poppins(
                               fontSize: 26,
                               fontWeight: FontWeight.w600,

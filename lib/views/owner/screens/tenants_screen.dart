@@ -1,84 +1,73 @@
 // lib/screens/tenants_screen.dart
-// Enhanced version: adds robust validation, error handling, image‑lifecycle cleanup,
-// flexible search (name / phone / house), server‑side pagination & sorting, and
-// deletes old photos from Storage when records change or are removed.
-
-import 'dart:io';
+// Modern UI revamp: blurred bubbles background, Poppins font, soft‑shadow cards,
+// server‑side pagination, search & sort.
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class TenantsScreen extends StatefulWidget {
-  const TenantsScreen({Key? key}) : super(key: key);
+  const TenantsScreen({super.key});
 
   @override
   State<TenantsScreen> createState() => _TenantsScreenState();
 }
 
-class _TenantsScreenState extends State<TenantsScreen> {
-  // ======== STATE ========
+class _TenantsScreenState extends State<TenantsScreen>
+    with SingleTickerProviderStateMixin {
+  // ─── state
   final _formKey = GlobalKey<FormState>();
-
-  // Form controllers
-  final _fullNameCtrl = TextEditingController();
+  final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _houseCtrl = TextEditingController();
-  final _idTypeCtrl = TextEditingController();
-  final _idNumberCtrl = TextEditingController();
+  final _nidaCtrl = TextEditingController();
   final _nokNameCtrl = TextEditingController();
   final _nokPhoneCtrl = TextEditingController();
-
-  File? _imageTmp;
-  final _picker = ImagePicker();
-
-  // Search & sort
   final _searchCtrl = TextEditingController();
-  String _searchTerm = '';
-  String _sortOption = 'nameAsc';
 
-  // Pagination (Firestore server‑side)
-  static const int _pageSize = 10;
-  DocumentSnapshot? _lastDoc; // cursor
-  bool _isLoadingMore = false;
-  bool _hasMore = true;
-  final List<DocumentSnapshot> _tenantDocs = [];
+  // property dropdown
+  List<DocumentSnapshot> _propertyDocs = [];
+  String? _selectedPropertyId;
 
-  String? _ownerId;
+  // list / pagination helpers
+  String _search = '';
+  String _sort = 'nameAsc';
+  final int _pageSize = 10;
+  bool _hasMore = true, _loadingMore = false;
+  DocumentSnapshot? _cursor;
+  final List<DocumentSnapshot> _docs = [];
 
-  // ======== LIFECYCLE ========
+  late final String _ownerId = FirebaseAuth.instance.currentUser!.uid;
+  late final AnimationController _fadeAnim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 800),
+  )..forward();
+
   @override
   void initState() {
     super.initState();
-    _ownerId = FirebaseAuth.instance.currentUser?.uid;
     _loadFirstPage();
   }
 
   @override
   void dispose() {
-    _fullNameCtrl.dispose();
+    _fadeAnim.dispose();
+    _nameCtrl.dispose();
     _phoneCtrl.dispose();
-    _houseCtrl.dispose();
-    _idTypeCtrl.dispose();
-    _idNumberCtrl.dispose();
+    _nidaCtrl.dispose();
     _nokNameCtrl.dispose();
     _nokPhoneCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  // ======== DATA FETCH ========
-  Query _baseQuery() {
+  // ─── Firestore query
+  Query _base() {
     Query q = FirebaseFirestore.instance
         .collection('Tenants')
-        .where('ownerId', isEqualTo: _ownerId!);
-    switch (_sortOption) {
-      case 'nameAsc':
-        q = q.orderBy('fullName');
-        break;
+        .where('ownerId', isEqualTo: _ownerId);
+    switch (_sort) {
       case 'nameDesc':
         q = q.orderBy('fullName', descending: true);
         break;
@@ -88,221 +77,214 @@ class _TenantsScreenState extends State<TenantsScreen> {
       case 'createdAsc':
         q = q.orderBy('createdAt');
         break;
+      default:
+        q = q.orderBy('fullName');
     }
     return q;
   }
 
   Future<void> _loadFirstPage() async {
     setState(() {
-      _tenantDocs.clear();
-      _lastDoc = null;
+      _docs.clear();
+      _cursor = null;
       _hasMore = true;
     });
     await _loadMore();
   }
 
   Future<void> _loadMore() async {
-    if (!_hasMore || _isLoadingMore) return;
-    setState(() => _isLoadingMore = true);
-
-    try {
-      Query q = _baseQuery().limit(_pageSize);
-      if (_lastDoc != null) q = q.startAfterDocument(_lastDoc!);
-      final snap = await q.get();
-      if (snap.docs.length < _pageSize) _hasMore = false;
-      if (snap.docs.isNotEmpty) _lastDoc = snap.docs.last;
-      setState(() => _tenantDocs.addAll(snap.docs));
-    } catch (e) {
-      _showSnack('Error loading tenants');
-    }
-    setState(() => _isLoadingMore = false);
+    if (!_hasMore || _loadingMore) return;
+    setState(() => _loadingMore = true);
+    Query q = _base().limit(_pageSize);
+    if (_cursor != null) q = q.startAfterDocument(_cursor!);
+    final snap = await q.get();
+    if (snap.docs.length < _pageSize) _hasMore = false;
+    if (snap.docs.isNotEmpty) _cursor = snap.docs.last;
+    setState(() {
+      _docs.addAll(snap.docs);
+      _loadingMore = false;
+    });
   }
 
-  // Helper to fetch tenants list (used in dropdown / uniqueness checks)
-  Future<List<DocumentSnapshot>> _fetchTenants() async {
+  // ─── utilities
+  void _snack(String m) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
+
+  Future<void> _fetchOwnerProperties() async {
     final snap =
         await FirebaseFirestore.instance
-            .collection('Tenants')
+            .collection('Properties')
             .where('ownerId', isEqualTo: _ownerId)
             .get();
-    return snap.docs;
+    _propertyDocs = snap.docs;
   }
 
-  // ======== VALIDATION HELPERS ========
-  final _phoneExp = RegExp(r'^[0-9+]{7,15}\$');
+  // ─── create / edit dialogs (reuse)
+  Future<void> _tenantDialog({DocumentSnapshot? doc}) async {
+    final isEdit = doc != null;
+    if (isEdit) {
+      final d = doc.data() as Map<String, dynamic>;
+      _nameCtrl.text = d['fullName'] ?? '';
+      _phoneCtrl.text = d['phoneNumber'] ?? '';
+      _nidaCtrl.text = d['nidanumber'] ?? '';
+      _nokNameCtrl.text = d['nextOfKinName'] ?? '';
+      _nokPhoneCtrl.text = d['nextOfKinPhoneNumber'] ?? '';
+    } else {
+      _formKey.currentState?.reset();
+      _nameCtrl.clear();
+      _phoneCtrl.clear();
+      _nidaCtrl.clear();
+      _nokNameCtrl.clear();
+      _nokPhoneCtrl.clear();
+      _selectedPropertyId = null;
+    }
 
-  String? _validatePhone(String? val) {
-    if (val == null || val.isEmpty) return 'Enter phone';
-    if (!_phoneExp.hasMatch(val)) return 'Invalid phone';
-    return null;
-  }
-
-  // ======== UI HELPERS ========
-  void _showSnack(String msg) {
-    if (!mounted) return; // avoid context issues
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
-
-  Future<void> _pickImage() async {
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 75,
-    );
-    if (picked != null) setState(() => _imageTmp = File(picked.path));
-  }
-
-  // ======== CREATE ========
-  Future<void> _addTenantDialog() async {
-    _clearForm();
-    await showDialog(
-      context: context,
-      builder:
-          (ctx) => _TenantFormDialog(
-            title: 'Add Tenant',
-            formKey: _formKey,
-            fullNameCtrl: _fullNameCtrl,
-            phoneCtrl: _phoneCtrl,
-            houseCtrl: _houseCtrl,
-            idTypeCtrl: _idTypeCtrl,
-            idNumberCtrl: _idNumberCtrl,
-            nokNameCtrl: _nokNameCtrl,
-            nokPhoneCtrl: _nokPhoneCtrl,
-            imageTmp: _imageTmp,
-            onPickImage: _pickImage,
-            validatePhone: _validatePhone,
-            onSave: () async {
-              if (!_formKey.currentState!.validate()) return;
-              try {
-                // Duplicate phone check (simple)
-                final dup =
-                    await FirebaseFirestore.instance
-                        .collection('Tenants')
-                        .where('ownerId', isEqualTo: _ownerId)
-                        .where('phoneNumber', isEqualTo: _phoneCtrl.text.trim())
-                        .get();
-                if (dup.docs.isNotEmpty) {
-                  _showSnack('Phone already exists');
-                  return;
-                }
-
-                String? url;
-                if (_imageTmp != null) {
-                  final ref = FirebaseStorage.instance.ref(
-                    'tenant_photos/${DateTime.now().millisecondsSinceEpoch}.jpg',
-                  );
-                  await ref.putFile(_imageTmp!);
-                  url = await ref.getDownloadURL();
-                }
-                await FirebaseFirestore.instance.collection('Tenants').add({
-                  'ownerId': _ownerId,
-                  'fullName': _fullNameCtrl.text.trim(),
-                  'phoneNumber': _phoneCtrl.text.trim(),
-                  'houseNumber': _houseCtrl.text.trim(),
-                  'idType': _idTypeCtrl.text.trim(),
-                  'idNumber': _idNumberCtrl.text.trim(),
-                  'profilePhotoUrl': url,
-                  'nextOfKinName': _nokNameCtrl.text.trim(),
-                  'nextOfKinPhoneNumber': _nokPhoneCtrl.text.trim(),
-                  'createdAt': FieldValue.serverTimestamp(),
-                });
-                Navigator.pop(ctx);
-                _loadFirstPage();
-              } catch (e) {
-                _showSnack('Failed to save tenant');
-              }
-            },
-          ),
-    );
-  }
-
-  // ======== EDIT ========
-  Future<void> _editTenantDialog(DocumentSnapshot doc) async {
-    final data = doc.data() as Map<String, dynamic>;
-    _fullNameCtrl.text = data['fullName'] ?? '';
-    _phoneCtrl.text = data['phoneNumber'] ?? '';
-    _houseCtrl.text = data['houseNumber'] ?? '';
-    _idTypeCtrl.text = data['idType'] ?? '';
-    _idNumberCtrl.text = data['idNumber'] ?? '';
-    _nokNameCtrl.text = data['nextOfKinName'] ?? '';
-    _nokPhoneCtrl.text = data['nextOfKinPhoneNumber'] ?? '';
-    _imageTmp = null;
-    String? existingUrl = data['profilePhotoUrl'];
+    await _fetchOwnerProperties();
+    if (_propertyDocs.isNotEmpty && _selectedPropertyId == null) {
+      _selectedPropertyId = _propertyDocs.first.id;
+    }
 
     await showDialog(
       context: context,
       builder:
-          (ctx) => _TenantFormDialog(
-            title: 'Edit Tenant',
-            formKey: _formKey,
-            fullNameCtrl: _fullNameCtrl,
-            phoneCtrl: _phoneCtrl,
-            houseCtrl: _houseCtrl,
-            idTypeCtrl: _idTypeCtrl,
-            idNumberCtrl: _idNumberCtrl,
-            nokNameCtrl: _nokNameCtrl,
-            nokPhoneCtrl: _nokPhoneCtrl,
-            imageTmp: _imageTmp,
-            existingPhotoUrl: existingUrl,
-            onPickImage: () async {
-              await _pickImage();
-              (ctx as Element).markNeedsBuild(); // refresh dialog
-            },
-            validatePhone: _validatePhone,
-            onSave: () async {
-              if (!_formKey.currentState!.validate()) return;
-              try {
-                String? url = existingUrl;
-                if (_imageTmp != null) {
-                  // upload new
-                  final ref = FirebaseStorage.instance.ref(
-                    'tenant_photos/${doc.id}_${DateTime.now().millisecondsSinceEpoch}.jpg',
-                  );
-                  await ref.putFile(_imageTmp!);
-                  url = await ref.getDownloadURL();
-                  // delete old
-                  if (existingUrl != null) {
-                    await FirebaseStorage.instance
-                        .refFromURL(existingUrl)
-                        .delete();
-                  }
-                }
-                await doc.reference.update({
-                  'fullName': _fullNameCtrl.text.trim(),
-                  'phoneNumber': _phoneCtrl.text.trim(),
-                  'houseNumber': _houseCtrl.text.trim(),
-                  'idType': _idTypeCtrl.text.trim(),
-                  'idNumber': _idNumberCtrl.text.trim(),
-                  'profilePhotoUrl': url,
-                  'nextOfKinName': _nokNameCtrl.text.trim(),
-                  'nextOfKinPhoneNumber': _nokPhoneCtrl.text.trim(),
-                });
-                Navigator.pop(ctx);
-                _loadFirstPage();
-              } catch (e) {
-                _showSnack('Update failed');
-              }
-            },
+          (ctx) => StatefulBuilder(
+            builder:
+                (ctx, dlgSet) => AlertDialog(
+                  title: Text(isEdit ? 'Edit Tenant' : 'Add Tenant'),
+                  content: SingleChildScrollView(
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        children: [
+                          TextFormField(
+                            controller: _nameCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Full Name',
+                            ),
+                            validator: (v) => v!.isEmpty ? 'Required' : null,
+                          ),
+                          TextFormField(
+                            controller: _phoneCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Phone',
+                            ),
+                            keyboardType: TextInputType.phone,
+                            validator: (v) => v!.isEmpty ? 'Required' : null,
+                          ),
+                          DropdownButtonFormField<String>(
+                            value: _selectedPropertyId,
+                            decoration: const InputDecoration(
+                              labelText: 'Select Property',
+                            ),
+                            items:
+                                _propertyDocs.map((p) {
+                                  final d = p.data() as Map<String, dynamic>;
+                                  return DropdownMenuItem(
+                                    value: p.id,
+                                    child: Text(d['address'] ?? 'Unnamed'),
+                                  );
+                                }).toList(),
+                            onChanged:
+                                (v) => dlgSet(() => _selectedPropertyId = v),
+                            validator:
+                                (v) => v == null ? 'Choose property' : null,
+                          ),
+                          TextFormField(
+                            controller: _nidaCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'NIDA Number',
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            controller: _nokNameCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Next‑of‑kin Name',
+                            ),
+                          ),
+                          TextFormField(
+                            controller: _nokPhoneCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Next‑of‑kin Phone',
+                            ),
+                            keyboardType: TextInputType.phone,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFB3640),
+                      ),
+                      onPressed: () async {
+                        if (!_formKey.currentState!.validate()) return;
+                        try {
+                          if (isEdit) {
+                            await doc.reference.update({
+                              'fullName': _nameCtrl.text.trim(),
+                              'phoneNumber': _phoneCtrl.text.trim(),
+                              'nidanumber': _nidaCtrl.text.trim(),
+                              'propertyId': _selectedPropertyId,
+                              'nextOfKinName': _nokNameCtrl.text.trim(),
+                              'nextOfKinPhoneNumber': _nokPhoneCtrl.text.trim(),
+                            });
+                          } else {
+                            await FirebaseFirestore.instance
+                                .collection('Tenants')
+                                .add({
+                                  'ownerId': _ownerId,
+                                  'fullName': _nameCtrl.text.trim(),
+                                  'phoneNumber': _phoneCtrl.text.trim(),
+                                  'nidanumber': _nidaCtrl.text.trim(),
+                                  'propertyId': _selectedPropertyId,
+                                  'nextOfKinName': _nokNameCtrl.text.trim(),
+                                  'nextOfKinPhoneNumber':
+                                      _nokPhoneCtrl.text.trim(),
+                                  'createdAt': FieldValue.serverTimestamp(),
+                                });
+                          }
+                          Navigator.pop(ctx);
+                          _loadFirstPage();
+                        } catch (_) {
+                          _snack('Save failed');
+                        }
+                      },
+                      child: const Text('Save'),
+                    ),
+                  ],
+                ),
           ),
     );
   }
 
-  // ======== DELETE ========
+  // ─── delete
   Future<void> _deleteTenant(DocumentSnapshot doc) async {
-    final data = doc.data() as Map<String, dynamic>;
+    final d = doc.data() as Map;
     final ok = await showDialog<bool>(
       context: context,
       builder:
           (ctx) => AlertDialog(
-            title: Text('Delete Tenant'),
-            content: Text('Delete ${data['fullName']} permanently?'),
+            title: Text('Delete ${d['fullName']}?'),
+            content: const Text('This cannot be undone.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: Text('Cancel'),
+                child: const Text('Cancel'),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: Text('Delete', style: TextStyle(color: Colors.red)),
+                child: const Text(
+                  'Delete',
+                  style: TextStyle(color: Colors.red),
+                ),
               ),
             ],
           ),
@@ -310,61 +292,39 @@ class _TenantsScreenState extends State<TenantsScreen> {
     if (ok != true) return;
     try {
       await doc.reference.delete();
-      if (data['profilePhotoUrl'] != null) {
+      if (d['profilePhotoUrl'] != null) {
         await FirebaseStorage.instance
-            .refFromURL(data['profilePhotoUrl'])
+            .refFromURL(d['profilePhotoUrl'])
             .delete();
       }
-      _showSnack('Tenant deleted');
+      _snack('Deleted');
       _loadFirstPage();
     } catch (_) {
-      _showSnack('Delete failed');
+      _snack('Delete failed');
     }
   }
 
-  // ======== UTIL ========
-  void _clearForm() {
-    _formKey.currentState?.reset();
-    _fullNameCtrl.clear();
-    _phoneCtrl.clear();
-    _houseCtrl.clear();
-    _idTypeCtrl.clear();
-    _idNumberCtrl.clear();
-    _nokNameCtrl.clear();
-    _nokPhoneCtrl.clear();
-    _imageTmp = null;
-  }
-
-  // ======== BUILD ========
+  // ─── build bubbles + list
   @override
   Widget build(BuildContext context) {
-    final list =
-        _tenantDocs.where((doc) {
-          final d = doc.data() as Map<String, dynamic>;
-          final term = _searchTerm.toLowerCase();
-          return (d['fullName'] ?? '').toString().toLowerCase().contains(
-                term,
-              ) ||
-              (d['phoneNumber'] ?? '').toString().toLowerCase().contains(
-                term,
-              ) ||
-              (d['houseNumber'] ?? '').toString().toLowerCase().contains(term);
-        }).toList();
-
     return Scaffold(
+      backgroundColor: const Color(0xFFF8F7F2),
       appBar: AppBar(
-        title: Text('Manage Tenants'),
-        backgroundColor: Color(0xFF22577A),
+        backgroundColor: const Color(0xFF22577A),
+        title: const Text('Tenants'),
         actions: [
-          IconButton(icon: Icon(Icons.add), onPressed: _addTenantDialog),
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () => _tenantDialog(),
+          ),
           PopupMenuButton<String>(
             onSelected:
                 (v) => setState(() {
-                  _sortOption = v;
+                  _sort = v;
                   _loadFirstPage();
                 }),
             itemBuilder:
-                (ctx) => [
+                (ctx) => const [
                   PopupMenuItem(value: 'nameAsc', child: Text('Name ↑')),
                   PopupMenuItem(value: 'nameDesc', child: Text('Name ↓')),
                   PopupMenuItem(value: 'createdDesc', child: Text('Newest')),
@@ -373,76 +333,117 @@ class _TenantsScreenState extends State<TenantsScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: InputDecoration(
-                hintText: 'Search name / phone / house',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onChanged: (v) => setState(() => _searchTerm = v),
-            ),
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: () async => _loadFirstPage(),
-              child: ListView.builder(
-                physics: const AlwaysScrollableScrollPhysics(),
-                itemCount: list.length + 1,
-                itemBuilder: (ctx, i) {
-                  if (i == list.length) {
-                    if (_hasMore) {
-                      _loadMore();
-                      return Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: CircularProgressIndicator(),
-                        ),
-                      );
-                    } else {
-                      return SizedBox.shrink();
-                    }
-                  }
-                  final doc = list[i];
-                  final d = doc.data() as Map<String, dynamic>;
-                  return Card(
-                    margin: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    child: ListTile(
-                      leading:
-                          d['profilePhotoUrl'] != null
-                              ? CircleAvatar(
-                                backgroundImage: NetworkImage(
-                                  d['profilePhotoUrl'],
-                                ),
-                              )
-                              : CircleAvatar(child: Icon(Icons.person)),
-                      title: Text(d['fullName'] ?? '-'),
-                      subtitle: Text(
-                        '${d['phoneNumber'] ?? '-'}  •  House: ${d['houseNumber'] ?? '-'}',
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: Icon(Icons.edit, color: Colors.blue),
-                            onPressed: () => _editTenantDialog(doc),
-                          ),
-                          IconButton(
-                            icon: Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _deleteTenant(doc),
-                          ),
-                        ],
+          const _Bubble(offset: Offset(-80, -90), color: Color(0xFF9ADBCD)),
+          const _Bubble(offset: Offset(330, -60), color: Color(0xFFB7B5F5)),
+          const _Bubble(offset: Offset(-60, 560), color: Color(0xFFFFD59E)),
+          FadeTransition(
+            opacity: _fadeAnim,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Search by name / phone / house',
+                      prefixIcon: const Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                  );
-                },
-              ),
+                    onChanged: (v) => setState(() => _search = v.toLowerCase()),
+                  ),
+                ),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: () async => _loadFirstPage(),
+                    child: ListView.builder(
+                      itemCount:
+                          _docs.where((doc) {
+                            final d = doc.data() as Map<String, dynamic>;
+                            return d['fullName']
+                                    .toString()
+                                    .toLowerCase()
+                                    .contains(_search) ||
+                                d['phoneNumber']
+                                    .toString()
+                                    .toLowerCase()
+                                    .contains(_search) ||
+                                d['houseNumber']
+                                    .toString()
+                                    .toLowerCase()
+                                    .contains(_search);
+                          }).length +
+                          1,
+                      itemBuilder: (ctx, i) {
+                        if (i == _docs.length) {
+                          if (_hasMore) {
+                            _loadMore();
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(16),
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+                          } else {
+                            return const SizedBox.shrink();
+                          }
+                        }
+                        final doc = _docs[i];
+                        final d = doc.data() as Map<String, dynamic>;
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          child: ListTile(
+                            leading:
+                                d['profilePhotoUrl'] != null
+                                    ? CircleAvatar(
+                                      backgroundImage: NetworkImage(
+                                        d['profilePhotoUrl'],
+                                      ),
+                                    )
+                                    : const CircleAvatar(
+                                      child: Icon(Icons.person),
+                                    ),
+                            title: Text(
+                              d['fullName'] ?? '-',
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${d['phoneNumber']} • House: ${d['houseNumber']}',
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.edit,
+                                    color: Colors.blue,
+                                  ),
+                                  onPressed: () => _tenantDialog(doc: doc),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.delete,
+                                    color: Colors.red,
+                                  ),
+                                  onPressed: () => _deleteTenant(doc),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -451,108 +452,23 @@ class _TenantsScreenState extends State<TenantsScreen> {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Reusable form dialog widget ------------------------------------------------
-// ----------------------------------------------------------------------------
-class _TenantFormDialog extends StatelessWidget {
-  const _TenantFormDialog({
-    required this.title,
-    required this.formKey,
-    required this.fullNameCtrl,
-    required this.phoneCtrl,
-    required this.houseCtrl,
-    required this.idTypeCtrl,
-    required this.idNumberCtrl,
-    required this.nokNameCtrl,
-    required this.nokPhoneCtrl,
-    required this.imageTmp,
-    required this.onPickImage,
-    required this.validatePhone,
-    required this.onSave,
-    this.existingPhotoUrl,
-  });
-
-  final String title;
-  final GlobalKey<FormState> formKey;
-  final TextEditingController fullNameCtrl;
-  final TextEditingController phoneCtrl;
-  final TextEditingController houseCtrl;
-  final TextEditingController idTypeCtrl;
-  final TextEditingController idNumberCtrl;
-  final TextEditingController nokNameCtrl;
-  final TextEditingController nokPhoneCtrl;
-  final File? imageTmp;
-  final VoidCallback onPickImage;
-  final String? Function(String?) validatePhone;
-  final VoidCallback onSave;
-  final String? existingPhotoUrl;
+class _Bubble extends StatelessWidget {
+  const _Bubble({required this.offset, required this.color});
+  final Offset offset;
+  final Color color;
 
   @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(title),
-      content: SingleChildScrollView(
-        child: Form(
-          key: formKey,
-          child: Column(
-            children: [
-              TextFormField(
-                controller: fullNameCtrl,
-                decoration: InputDecoration(labelText: 'Full Name'),
-                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
-              ),
-              TextFormField(
-                controller: phoneCtrl,
-                decoration: InputDecoration(labelText: 'Phone Number'),
-                keyboardType: TextInputType.phone,
-                validator: validatePhone,
-              ),
-              TextFormField(
-                controller: houseCtrl,
-                decoration: InputDecoration(labelText: 'House/Unit No.'),
-                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
-              ),
-              TextFormField(
-                controller: idTypeCtrl,
-                decoration: InputDecoration(labelText: 'ID Type'),
-              ),
-              TextFormField(
-                controller: idNumberCtrl,
-                decoration: InputDecoration(labelText: 'ID Number'),
-              ),
-              const SizedBox(height: 8),
-              if (existingPhotoUrl != null && imageTmp == null)
-                Image.network(existingPhotoUrl!, height: 90),
-              if (imageTmp != null) Image.file(imageTmp!, height: 90),
-              TextButton.icon(
-                icon: Icon(Icons.image),
-                label: Text('Pick Photo'),
-                onPressed: onPickImage,
-              ),
-              TextFormField(
-                controller: nokNameCtrl,
-                decoration: InputDecoration(labelText: 'Next of Kin Name'),
-              ),
-              TextFormField(
-                controller: nokPhoneCtrl,
-                decoration: InputDecoration(labelText: 'Next of Kin Phone'),
-                keyboardType: TextInputType.phone,
-              ),
-            ],
-          ),
-        ),
+  Widget build(BuildContext context) => Positioned(
+    left: offset.dx,
+    top: offset.dy,
+    child: Container(
+      width: 180,
+      height: 180,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .35),
+        shape: BoxShape.circle,
+        boxShadow: [BoxShadow(color: color, blurRadius: 80, spreadRadius: 10)],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: onSave,
-          child: Text('Save'),
-          style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF22577A)),
-        ),
-      ],
-    );
-  }
+    ),
+  );
 }

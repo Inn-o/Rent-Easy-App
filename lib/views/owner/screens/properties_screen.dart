@@ -12,7 +12,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 
 class PropertiesScreen extends StatefulWidget {
-  const PropertiesScreen({Key? key}) : super(key: key);
+  const PropertiesScreen({super.key});
 
   @override
   State<PropertiesScreen> createState() => _PropertiesScreenState();
@@ -47,8 +47,8 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
         await FirebaseFirestore.instance
             .collection('Users')
             .where('role', isEqualTo: 'tenant')
-            .where('userId', isNotEqualTo: _ownerId)
-            //.where('ownerId', isEqualTo: _ownerId)
+            //.where('userId', isNotEqualTo: _ownerId)
+            .where('ownerId', isEqualTo: _ownerId)
             .where('propertyId', isNull: true)
             .get();
     return snap.docs;
@@ -204,10 +204,11 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
                           );
                           await ref.putFile(newImg!);
                           url = await ref.getDownloadURL();
-                          if (oldUrl != null)
+                          if (oldUrl != null) {
                             await FirebaseStorage.instance
                                 .refFromURL(oldUrl)
                                 .delete();
+                          }
                         }
                         await FirebaseFirestore.instance
                             .collection('Properties')
@@ -344,8 +345,9 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
                                 source: ImageSource.gallery,
                                 imageQuality: 75,
                               );
-                              if (p != null)
+                              if (p != null) {
                                 setDlg(() => _pickedImg = File(p.path));
+                              }
                             },
                           ),
                         ],
@@ -450,8 +452,9 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
                       .collection('Properties')
                       .doc(id)
                       .delete();
-                  if (imgUrl != null)
+                  if (imgUrl != null) {
                     await FirebaseStorage.instance.refFromURL(imgUrl).delete();
+                  }
                   Navigator.pop(ctx);
                 },
                 child: const Text('Delete'),
@@ -626,7 +629,7 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
                                           ),
                                         ),
                                       );
-                                    }).toList(),
+                                    }),
                                   ],
                                 )
                                 .toList(),
